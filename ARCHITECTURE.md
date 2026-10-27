@@ -1,8 +1,8 @@
-# Eluno Till — Architecture and HLD
+# Eluno POS architecture
 
-Two diagrams below: how things are wired today (as far as the brief tells us), and how I've wired the exercise. Where the pack doesn't say how two non-Shopify systems talk to each other, I've drawn it as unknown rather than inventing a line. Goal is the same as the brief's: replace Shopify POS at the till, keep Shopify as the record, no UI needed.
+The first diagram is my read of the current setup from the brief. The second shows what I built for the exercise. Dotted lines mean the brief doesn't say how those systems connect.
 
-## 1. Current-state HLD (as stated in the brief)
+## Current setup
 
 ```mermaid
 flowchart LR
@@ -33,11 +33,11 @@ flowchart LR
     StoreTool -. "Integration / handoff is not specified by the pack" .-> OMS
 ```
 
-So today the staff member rings the sale up in Shopify POS, and Shopify already holds the customers, stock, orders and money. The store tool owns the queue, eye tests and prescriptions; the OMS owns lab and dispatch; WhatsApp just does leads. Note what the pack *doesn't* tell us: how the store tool and the OMS currently feed a sale at the till. That dotted line stays dotted until someone confirms it.
+Shopify POS handles the sale today. Shopify holds customers, products, stock, orders and payments. The store tool handles the queue, eye tests and prescriptions; the OMS handles lab work and dispatch. The brief doesn't explain how the store tool and OMS connect to billing, so those links are left dotted.
 
-## 2. Target-state HLD (implemented exercise scope)
+## What this exercise builds
 
-What I actually built: a CLI, some workflow code, and rules that only ever see plain dicts and paise. Anything that looks like Shopify JSON is confined to `pos/adapters.py` and the order/refund mapping in `service.py`. SQLite is there for two jobs only — remembering where an interrupted bill got to, and holding the invoice counters. It is deliberately *not* a second copy of Shopify's books.
+The app is a Python command-line program. The workflow calls the APIs through `pos/adapters.py`; the pricing and validation code works with plain dictionaries and integer paise. SQLite keeps checkout/refund progress and invoice counters. Shopify remains the record for customers, stock, orders and payments.
 
 ```mermaid
 flowchart LR
@@ -82,18 +82,11 @@ flowchart LR
     Records -. "Lab handoff not implemented" .-> OMS
 ```
 
-### Ownership and boundary
+### Where data lives
 
-| Capability/data | Owner | Implemented till behavior |
-|---|---|---|
-| Customer, tags, catalog, inventory, orders, transactions and refunds | Shopify | Read via Shopify adapter; create paid orders and full refunds via Shopify-shaped writes. |
-| Prescriptions and seeded store staff | Store tool | Fetch by phone/store; select newest unexpired Rx; block invalid Rx/lens combinations. |
-| Captures and terminal refunds | Terminal | Use checkout key as `order_ref`, persist returned charge/refund IDs, and stop on ambiguous outcome. |
-| GST rates and offers | POS-owned JSON | Load at runtime; date/condition/stackability-aware discount evaluation and per-line tax math. |
-| Invoice/credit-note counters and recovery intents | POS-owned SQLite | Atomically reserve per-store sequence and persist checkout/refund states and keys. |
-| Lab order, QC, dispatch; cash-drawer operations | Existing systems / POS-owned future scope | Not implemented or sent to OMS in this exercise. |
+Shopify owns customers, products, stock, orders and refunds. The store tool supplies prescriptions and staff records; the terminal handles charges and refunds. GST rates and offers are JSON files. SQLite keeps invoice counters and the state of interrupted checkouts/refunds; it isn't a second Shopify ledger. This exercise doesn't send work to the OMS or track cash-drawer movements.
 
-## 3. Implemented checkout and refund flow
+## Checkout and refund flow
 
 ```mermaid
 sequenceDiagram
@@ -137,27 +130,22 @@ sequenceDiagram
     CLI-->>Staff: Credit-note / refund reference
 ```
 
-### Domain and money decisions
+### A few implementation choices
 
-- Checkout accepts one or more prescription frame/lens pairs for one Shopify customer. Each pair can specify an Rx ID; otherwise the latest valid Rx is selected.
-- Sphere/cylinder limits and progressive/bifocal ADD requirements come from the selected lens variant. Axis outside 0–180° or off the 5° grid is blocked with an optometrist-confirmation reason; it is never silently rounded.
-- All offers are read from JSON and checked against active flag, inclusive date range, conditions, target, and stackability. A combination is allowed only if every selected offer is stackable; a non-stackable offer competes alone. Choose maximum total savings; ties prefer fewer offers and stable offer IDs. Priority determines deterministic application order. Flat pair/cart discounts are capped and allocated in paise.
-- GST is inclusive, selected by HSN/effective date, and computed per line after discounts. Combined rate is split CGST/SGST; half-up rounding preserves each line's paisa reconciliation. Shopify receives decimal strings and `taxes_included: true`.
-- Manager override is a requested percentage up to 10%, checked against same-store manager staff data, with reason and approver captured as order metadata. The mock has no authentication, so this is not a production authorization control.
-- Full refund amount is obtained from Shopify's calculate response and checked against maximum refundable. The terminal refund precedes the Shopify refund; recovery state is durable. Frame restocks to original `location_id`, lens never restocks, and the Shopify refund transaction points to the sale transaction.
-- Day-end reads Shopify. Sales are grouped by order business date; refunds by refund business date in IST. Gross is before discounts; taxable/tax are derived from line tax data; payment and refund totals are split by method.
+- A bill can contain several frame/lens pairs for one customer. Each pair can name its prescription; otherwise the app picks the latest valid one. Sphere and cylinder must fit the lens. Progressive and bifocal lenses need an ADD. An axis outside 0–180° or off the 5° grid is blocked for optometrist confirmation, never rounded.
+- Offers come from JSON. Stackable offers can combine; non-stackable offers compete on their own. The permitted choice with the greatest saving wins, with stable tie-breaks. A manager discount is different: if requested and authorized, it is applied on its own because the manager offer is marked non-stackable. The reason and approver go on the order. The mock has no real login, so this is not production authorization.
+- Prices include GST. The app selects the rate by HSN and effective date, works out tax per line after discounts, and splits it into CGST/SGST. Rounding is half-up in paise; Shopify gets decimal strings.
+- A full refund uses Shopify's calculated amount. The frame returns to the original store; the made-to-order lens does not. Day-end sales use the sale date and refunds use the refund date. Finance should confirm that reporting rule.
 
-## 4. Recovery state and production limits
+## Recovery and things to fix before production
 
-- Checkout states include `prepared`, `charge_pending`, `charged_order_pending`, `shopify_create_pending`, `complete`, `void`, `void_refunded` and `needs_reconciliation`. Conditional SQLite state claims guard local side effects. Known 429s are retried with `Retry-After`; the same checkout key is reused.
-- Refund states include `prepared`, `terminal_pending`, `terminal_succeeded`, `shopify_write_pending`, `shopify_refund_pending`, `complete` and `needs_reconciliation`. The terminal mock has no refund idempotency/status lookup, so ambiguous terminal outcomes are not retried automatically.
-- The starter docs claim terminal charge idempotency by `order_ref`; implementation inspection shows repeated successful charges with the same reference create another charge. The adapter retries the mock's explicit simulated 503 with the same key as directed, but any ambiguous network result is held for reconciliation.
-- Shopify order create is not idempotent. A unique `checkout_key` is written to order metadata and looked up before retry, but the mock has no searchable-key endpoint and returns only 250 oldest-first orders. Production needs pagination and authoritative lookup/webhook reconciliation before automatically retrying uncertain creates.
-- SQLite invoice counters are atomic for this single-process exercise. Seven stores/multiple tills need a shared allocator, fiscal-year rollover and void policy sign-off. A reserved-but-failed invoice remains in the local intent history; it is not silently reused.
-- The local intent queue does not authorize offline payments or guarantee offline inventory. Cash-drawer float/movements, family billing, remakes, partial refunds, printing, scheduled email, OMS/lab handoff and AI stretch features are out of scope.
-- Production also needs staff authentication, secrets and PII protection, pagination, monitoring, backups, terminal/Shopify reconciliation and an operational rollout/support plan.
+SQLite records the checkout/refund states shown in the sequence diagram. Known 429 responses use `Retry-After`. When a write times out and we can't tell if it worked, the app stops for reconciliation rather than blindly sending it again.
 
-## 5. References
+There are two important mock limitations. Its docs say a terminal charge is idempotent by `order_ref`, but repeating a successful charge actually creates another one. The terminal also has no refund status lookup. The Shopify order-create endpoint isn't idempotent either; the app searches for its checkout key, but the mock only returns 250 oldest orders and has no lookup-by-key endpoint. These need real vendor/API support before safe automatic recovery in production.
+
+Invoice counters use one local SQLite file, which is fine for this exercise but not seven stores or multiple tills. A real rollout also needs agreed invoice rollover/void rules, staff authentication, secret and customer-data protection, backups, monitoring, and an operations plan. Offline payment, cash-drawer tracking, family billing, remakes, partial refunds, printing, scheduled email and the OMS/lab handoff are not built here.
+
+## References
 
 - [Candidate brief](brief/CANDIDATE_BRIEF.md)
 - [Stakeholder thread](brief/STAKEHOLDER_THREAD.md)
