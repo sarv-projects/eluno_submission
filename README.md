@@ -1,6 +1,6 @@
 # Eluno POS exercise
 
-A till CLI that replaces Shopify POS while Shopify stays the system of record. Python 3.8+, standard library only, nothing to install. Talks to the mock's three surfaces (Shopify Admin, store tool, terminal) and keeps money in integer paise the whole way through.
+A checkout app you run by typing commands in a terminal. It covers the billing flow that would replace Shopify POS, while Shopify remains the system of record. Python 3.8+, standard library only, nothing to install. Talks to the mock's three surfaces (Shopify Admin, store tool, terminal) and keeps money in integer paise the whole way through.
 
 ## Running it
 
@@ -94,5 +94,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagrams (current state, target s
 `python3 -m unittest discover -v` — 14 tests: inclusive-GST rounding against the reference invoice, offer selection and per-line allocation, second-pair targeting, manager authorization (and that a requested override lands with its audit fields), expired/off-grid/out-of-range prescription blocks, full mock checkout with stock decrement, same-key idempotent replay, refund restock rules, channel split in day-end, and 429/503 retry behaviour.
 
 `python3 starter-kit/validate_seed.py` still passes on the untouched fixtures.
+
 
 
