@@ -1,99 +1,116 @@
 # Eluno POS exercise
 
-A checkout app you run by typing commands in a terminal. It covers the billing flow that would replace Shopify POS, while Shopify remains the system of record. Python 3.8+, standard library only, nothing to install. Talks to the mock's three surfaces (Shopify Admin, store tool, terminal) and keeps money in integer paise the whole way through.
+## What the exercise asks for
 
-## Running it
+Build a local billing app to replace Shopify POS at the store counter, while Shopify remains the system of record. It should work against the supplied Shopify, store-tool and payment-terminal mocks. The submission also includes a stakeholder reply and a short Loom demo; the Loom is shared separately from this repository.
 
-Two commands, both from this directory:
+This repository contains the stakeholder reply, the billing app, tests and the supplied mock data. The app runs in Python 3.8+ and uses only the standard library.
+
+## Must requirements
+
+All seven Must items are implemented:
+
+1. Look up a Shopify customer by phone and fetch their latest valid prescription from the store tool.
+2. Build frame-and-lens pairs from catalog variants; check the lens against the prescription and explain invalid choices so staff can fix them.
+3. Apply active offers from `offers.json` using their dates, conditions and stackability rules.
+4. Calculate inclusive GST by HSN for each line, with taxable value, CGST and SGST reconciled to paise.
+5. Charge the terminal, then create the Shopify order with its line items, taxes, discounts, sale transaction, prescription details and a separate per-store invoice number.
+6. Process a full refund through Shopify, reverse the tax, restock the frame at the selling store and leave the made-to-order lens out of stock.
+7. Build a store-and-date day-end report from Shopify orders, including bill count, gross, taxable, tax, discounts, refunds and payment-method totals.
+
+## Should and Stretch
+
+Of the Should items, the sales-channel work is implemented: checkout records `walk_in`, `whatsapp_booked` or `online_pickup`, and the day-end report breaks totals down by channel. The other Should items are not included:
+
+- Cash drawer sessions, paid-ins, paid-outs and closing variance.
+- Partial refunds.
+- A printable HTML or PDF invoice.
+- A separate audit log. Manager overrides do record the approver and reason on the Shopify order, but that is not a full audit-history system.
+
+None of the Stretch items are implemented: offer authoring from plain English, prescription-entry assistance, or billing-time anomaly flags.
+
+## Run it
+
+From this directory, run the end-to-end demo or the tests:
 
 ```bash
-./run_demo.sh                      # starts the mock, bills, refunds, prints day-end, stops the mock
-python3 -m unittest discover -v    # tests, starts its own mock
+./run_demo.sh
+python3 -m unittest discover -v
 ```
 
-`run_demo.sh` uses port 18787 and its own `pos_demo.sqlite3` (throwaway — delete it to reset invoice numbers). Change either with `PORT=19000 DB=/tmp/eluno.sqlite3 ./run_demo.sh`.
-
-### Running the pieces by hand
-
-Start the mock in one terminal:
+The demo starts the mock on port `18787`, completes a checkout and refund, prints the day-end report, then stops the mock. It stores its local invoice and checkout state in `pos_demo.sqlite3`; the file is ignored by Git. To use a different port or database:
 
 ```bash
-python3 starter-kit/mock-apis/mock_server.py --port 9000     # add --no-flake to kill the 429/503 behaviour
+PORT=19000 DB=/tmp/eluno-demo.sqlite3 ./run_demo.sh
 ```
 
-Then in another terminal:
+The tests start their own mock. No separate server is needed for either command.
+
+## Try an individual command
+
+If you want to see a quote, checkout, refund or report separately, start the mock in one terminal:
 
 ```bash
-# 1. price a cart without charging anything
+python3 starter-kit/mock-apis/mock_server.py --port 9000
+```
+
+Then run the app from another terminal in this directory. `quote` validates the cart without charging:
+
+```bash
 python3 -m pos.cli --base-url http://127.0.0.1:9000 quote \
   --phone +919000000005 --store HSR --staff S105 \
   --pair 91000003:91000083 --date 2026-10-27
+```
 
-# 2. actually charge and create the Shopify order
+`checkout` charges the terminal and creates the Shopify order. The pair format is `FRAME_VARIANT:LENS_VARIANT[:RX_ID]`; repeat `--pair` to add more pairs for the same customer. Leave off `RX_ID` to use the latest valid prescription.
+
+```bash
 python3 -m pos.cli --base-url http://127.0.0.1:9000 checkout \
   --phone +919000000005 --store HSR --staff S105 \
   --pair 91000003:91000083 --channel walk_in --payment upi \
   --date 2026-10-27 --checkout-key HSR-DEMO-001
+```
 
-# 3. full refund by invoice number (frame goes back to stock, lens doesn't)
+A refund uses the invoice number returned by checkout. The supplied HSR data has two invoices already, so a fresh mock starts the next one at `ELU/HSR/FY26/00003`.
+
+```bash
 python3 -m pos.cli --base-url http://127.0.0.1:9000 refund \
   --invoice ELU/HSR/FY26/00003 --store HSR \
   --reason 'Customer changed mind' --reason-code CHANGED_MIND \
   --refund-key HSR-DEMO-REFUND-001
 
-# 4. day-end, read out of Shopify
 python3 -m pos.cli --base-url http://127.0.0.1:9000 report \
   --store HSR --date 2026-10-27
 ```
 
-A few things worth knowing before you try it:
-
-- The HSR seed already has two invoices, so a fresh run starts at `ELU/HSR/FY26/00003`. Take the invoice number from checkout's output rather than guessing.
-- `--pair` is `FRAME_VARIANT:LENS_VARIANT[:RX_ID]`, repeatable for a multi-pair bill for one customer. Leave RX off and it picks the customer's newest valid prescription.
-- **`--checkout-key` is the safety net.** Reuse the same key and same inputs to resume or reconcile an interrupted bill; ambiguous writes stop for reconciliation instead of replaying. A new key means a new bill. Never mint one just because a charge response timed out. Refund keys work the same way.
-- Omit `--date` for today.
-
-### Manager discount
-
-The override button exists, but it's audited: 0–10%, the approver has to be an authorized manager in that same store, and both the reason code and approver ID go onto the Shopify order.
+A manager discount needs an authorized manager, a reason code and an approver ID. It is marked non-stackable in the offer data, so asking for it replaces the automatic offers; run a quote without the manager flag to compare first.
 
 ```bash
-python3 -m pos.cli ... checkout ... \
+python3 -m pos.cli --base-url http://127.0.0.1:9000 checkout \
+  --phone +919000000005 --store HSR --staff S105 \
+  --pair 91000003:91000083 --channel walk_in --payment upi \
+  --date 2026-10-27 --checkout-key HSR-MANAGER-001 \
   --manager-discount-percent 5 --reason-code WALKOUT --approver-id S108
 ```
 
-One deliberate choice: because the manager rule is marked non-stackable in `offers.json`, requesting it *replaces* the automatic offers rather than stacking on top. Run `quote` without the manager flag first if you want to compare the automatic discount. If Retail wants the override to stack instead, that needs a policy decision and a change to the offer rules.
+## Decisions and limits
 
-## What's built
+Money stays in integer paise in the app; decimal strings are used at the Shopify boundary. Offers are selected by maximum customer saving among the permitted combinations. A requested manager override is mandatory, and because it is non-stackable it stands alone. These are explicit choices in the exercise, not production policy signed off by Retail or Finance.
 
-**Must, end to end:** customer by phone → newest unexpired prescription → frame + lens validated against that prescription (sphere/cylinder range, ADD for progressive/bifocal, 5° axis, actionable failure messages) → offers → per-line GST by HSN → terminal charge → Shopify order with invoice/channel/staff/Rx data → full refund with correct restocking → day-end report computed from Shopify.
+Checkout writes a local intent before external calls. Reuse the same checkout key and inputs to resume or reconcile an interrupted attempt; don't create a new key just because the terminal response timed out. Ambiguous writes stop for reconciliation rather than being replayed blindly.
 
-**Also did, from the Should list:** the **channel report** — day-end now splits bills, gross, discounts, net sales and refunds by `walk_in` / `whatsapp_booked` / `online_pickup`. Channel was already being written to every order; this just reports it. I picked this one because it's pure reporting over data we already store — no new state, no new policy decisions, low risk of being wrong. The others needed things I'd rather not guess at (see below).
+There are limits in the supplied mocks that matter:
 
-**Decisions that are visible in the code:**
+- Repeating a successful terminal charge with the same `order_ref` can create another charge, despite the mock documentation. Terminal refunds have no idempotency key or status lookup, so an uncertain terminal result is not retried automatically.
+- Shopify order creation is not idempotent, and the mock order list returns at most 250 oldest orders. The app scans for its checkout key before retrying, but a production integration needs pagination and a reliable lookup-by-key or webhook.
+- Invoice counters are kept in one local SQLite database. That is enough for this single-process exercise, not a shared allocator for seven stores. Finance still needs to confirm fiscal-year rollover and void rules.
+- The report reads from Shopify; sales are counted on the sale date and refunds on the refund date. Finance should confirm that treatment. The mock's 250-order limit can also affect reports.
+- This is not offline billing. A network failure leaves a saved pending intent; it does not reserve stock or authorize taking payment offline.
 
-- *Offer precedence:* every offer in a combo must be stackable; non-stackable ones compete alone; best total customer saving wins, ties go to fewer offers then alphabetically. Priority only decides application order, not selection. Every offer that was skipped carries a reason.
-- *Manager discount is never silent* and never un-audited.
-- *Architecture:* Shopify types stop at `pos/adapters.py`. Domain rules (`money.py`, `offers.py`, prescription checks) take and return plain dicts and paise, so swapping Shopify out wouldn't touch them. Rates and offers are read from JSON at runtime — changing a GST rate or adding an offer needs no code change.
-- *Recovery:* intent saved locally before each external call; states are `prepared → charge_pending → charged_order_pending → shopify_create_pending → complete`, with `needs_reconciliation` as the dead-end for anything ambiguous. 429s honour `Retry-After`; the terminal's simulated 503 retries on the same key; a timeout mid-write **stops** rather than replaying.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagrams (current state, target state, checkout/refund sequence).
-
-## Limits to keep in mind
-
-- **Mock behaviour differs from its own docs.** Repeating a *successful* terminal charge with the same `order_ref` creates a second charge (the README says it's idempotent; it isn't — only the 503-retry path is). Terminal refunds have no idempotency key or status lookup at all. So an ambiguous terminal outcome is held for reconciliation, never auto-retried. This needs the real vendor's contract.
-- **No lookup-by-key endpoint in Shopify.** Order create isn't idempotent; I stamp `checkout_key` onto the order and scan for it before retrying, but the mock's order list caps at 250 oldest-first. Production needs pagination plus a searchable external reference or webhook before ambiguous creates can be safely retried.
-- **Invoice numbers are per-store sequential in a single SQLite file.** Right for one process, wrong for seven stores — real rollout needs a shared atomic allocator, and Finance still needs to confirm the FY rollover and void rules. Reserved-but-failed numbers stay in the local record rather than being reused.
-- **Not true offline mode.** An outage leaves a durable pending intent; it does not mean we can take money or promise stock while Shopify is down.
-- **Day-end is Shopify-sourced, sales on sale date, refunds on refund date.** Confirm that treatment with Finance. Mock list endpoint truncation applies here too.
-- **Not built:** UI, family billing, remakes, partial refunds, cash drawer, print/PDF, the 10 a.m. email, offer authoring/AI, prescription AI, anomaly flags, queue/camera fixes, OMS handoff. Reasons for each are in `STAKEHOLDER_REPLY.md`.
-- Off-grid external prescriptions are blocked for optometrist confirmation — nothing is ever silently rounded.
+The email says the exercise window is 72 hours, while the attached brief says 48. That discrepancy is noted in `STAKEHOLDER_REPLY.md`.
 
 ## Tests
 
-`python3 -m unittest discover -v` — 14 tests: inclusive-GST rounding against the reference invoice, offer selection and per-line allocation, second-pair targeting, manager authorization (and that a requested override lands with its audit fields), expired/off-grid/out-of-range prescription blocks, full mock checkout with stock decrement, same-key idempotent replay, refund restock rules, channel split in day-end, and 429/503 retry behaviour.
+`python3 -m unittest discover -v` runs 14 tests covering tax and rounding, offer selection, second-pair discounts, manager authorization, prescription validation, checkout replay, refund/restock behaviour, channel reporting and 429/503 retries. The supplied fixtures also pass `python3 starter-kit/validate_seed.py`.
 
-`python3 starter-kit/validate_seed.py` still passes on the untouched fixtures.
-
-
-
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagrams and [STAKEHOLDER_REPLY.md](STAKEHOLDER_REPLY.md) for the Part A response.
