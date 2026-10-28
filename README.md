@@ -2,9 +2,7 @@
 
 ## What the exercise asks for
 
-Build a local billing app to replace Shopify POS at the store counter, while Shopify remains the system of record. It should work against the supplied Shopify, store-tool and payment-terminal mocks. The submission also includes a stakeholder reply and a short Loom demo; the Loom is shared separately from this repository.
-
-This repository contains the stakeholder reply, the billing app, tests and the supplied mock data. The app runs in Python 3.8+ and uses only the standard library.
+The exercise has three parts: reply to the stakeholder thread, build the billing app, and record a short Loom demo. This repo has the reply, app, tests and mock data; the Loom link is sent separately. The app runs in Python 3.8+ and uses only the standard library.
 
 ## Must requirements
 
@@ -20,7 +18,7 @@ All seven Must items are implemented:
 
 ## Should and Stretch
 
-Of the Should items, the sales-channel work is implemented: checkout records `walk_in`, `whatsapp_booked` or `online_pickup`, and the day-end report breaks totals down by channel. The other Should items are not included:
+I picked the sales-channel item from Should. Checkout records `walk_in`, `whatsapp_booked` or `online_pickup`, and the report splits totals by channel. I left the other Should items out:
 
 - Cash drawer sessions, paid-ins, paid-outs and closing variance.
 - Partial refunds.
@@ -46,9 +44,9 @@ PORT=19000 DB=/tmp/eluno-demo.sqlite3 ./run_demo.sh
 
 The tests start their own mock. No separate server is needed for either command.
 
-## Try an individual command
+## Run a command separately
 
-If you want to see a quote, checkout, refund or report separately, start the mock in one terminal:
+Start the mock in one terminal:
 
 ```bash
 python3 starter-kit/mock-apis/mock_server.py --port 9000
@@ -95,19 +93,19 @@ python3 -m pos.cli --base-url http://127.0.0.1:9000 checkout \
 
 ## Decisions and limits
 
-Money stays in integer paise in the app; decimal strings are used at the Shopify boundary. Offers are selected by maximum customer saving among the permitted combinations. A requested manager override is mandatory, and because it is non-stackable it stands alone. These are explicit choices in the exercise, not production policy signed off by Retail or Finance.
+I keep money in paise and convert it to decimal strings only when sending it to Shopify. For offers, the app picks the permitted combination with the biggest saving. If a manager requests the non-stackable override, it replaces the automatic offers.
 
-Checkout writes a local intent before external calls. Reuse the same checkout key and inputs to resume or reconcile an interrupted attempt; don't create a new key just because the terminal response timed out. Ambiguous writes stop for reconciliation rather than being replayed blindly.
+Before checkout calls another system, it saves an intent and a key. If an attempt is interrupted, use the same key and inputs to resume it. If the app can't tell whether a payment or order went through, it stops for reconciliation. Don't retry with a new key; that could create a second charge or order.
 
-There are limits in the supplied mocks that matter:
+Some limits come from the mock; others come from keeping this a local, single-process exercise:
 
-- Repeating a successful terminal charge with the same `order_ref` can create another charge, despite the mock documentation. Terminal refunds have no idempotency key or status lookup, so an uncertain terminal result is not retried automatically.
-- Shopify order creation is not idempotent, and the mock order list returns at most 250 oldest orders. The app scans for its checkout key before retrying, but a production integration needs pagination and a reliable lookup-by-key or webhook.
-- Invoice counters are kept in one local SQLite database. That is enough for this single-process exercise, not a shared allocator for seven stores. Finance still needs to confirm fiscal-year rollover and void rules.
-- The report reads from Shopify; sales are counted on the sale date and refunds on the refund date. Finance should confirm that treatment. The mock's 250-order limit can also affect reports.
-- This is not offline billing. A network failure leaves a saved pending intent; it does not reserve stock or authorize taking payment offline.
+- The mock says terminal charges are idempotent by `order_ref`, but repeating a successful charge can create another one. Terminal refunds have no idempotency key or status lookup, so an uncertain refund needs manual reconciliation.
+- Shopify order creation isn't idempotent. The app searches for its checkout key before retrying, but the mock only returns the 250 oldest orders. A real integration needs pagination and a reliable lookup by key or a webhook.
+- Invoice numbers live in one local SQLite database. That works for this single-process exercise, not seven stores or several tills. Finance still needs to confirm the fiscal-year rollover and void rules.
+- The report reads from Shopify and counts sales on the sale date, refunds on the refund date. Finance should confirm that rule. The 250-order limit can also leave the report incomplete.
+- This isn't offline billing. If the network drops, the app saves the pending intent; it can't promise stock or take payment offline.
 
-The email says the exercise window is 72 hours, while the attached brief says 48. That discrepancy is noted in `STAKEHOLDER_REPLY.md`.
+One mismatch in the exercise materials: the email says 72 hours, the brief says 48. I asked about it in `STAKEHOLDER_REPLY.md`.
 
 ## Tests
 

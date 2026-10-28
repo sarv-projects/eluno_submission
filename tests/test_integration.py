@@ -118,9 +118,11 @@ class MockFlowTests(unittest.TestCase):
         self.assertIn("MANAGER_OVERRIDE",{a["title"] for a in order["discount_applications"]})
 
     def test_day_report_splits_sales_by_channel(self):
-        self.svc.checkout("+919000000005","HSR","S105",[[91000003,91000083,None]],
-                          channel="whatsapp_booked",sale_date="2026-10-27",checkout_key="IT-CHANNEL")
-        report=self.svc.day_report("HSR","2026-10-27")
+        result=self.svc.checkout("+919000000005","HSR","S105",[[91000003,91000083,None]],
+                                 channel="whatsapp_booked",sale_date="2026-10-27",checkout_key="IT-CHANNEL")
+        order=ShopifyAdapter(self.http).order(result["shopify_order_id"])
+        report_date=event_date(order["created_at"]).isoformat()
+        report=self.svc.day_report("HSR",report_date)
         self.assertIn("whatsapp_booked",report["by_channel"])
         self.assertEqual(report["by_channel"]["whatsapp_booked"]["bill_count"],1)
         self.assertGreater(report["by_channel"]["whatsapp_booked"]["net_sales_paise"],0)
