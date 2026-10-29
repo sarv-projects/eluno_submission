@@ -1,96 +1,116 @@
+<!-- till screen. one page, no build step, talks to server.py which runs the mock too -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Eluno POS</title>
+<link rel="icon" href="data:," />
 <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
 <header>
   <h1>Eluno POS</h1>
-  <p class="muted">Billing against the local Shopify, store-tool and terminal mocks.</p>
+  <p class="muted">Till screen for one store. Shopify stays the record; this talks to the local mocks.</p>
 </header>
 
 <main>
   <section class="card">
-    <h2>1. Store and staff</h2>
+    <h2>Store and cashier</h2>
     <div class="row">
       <label>Store <select id="store"></select></label>
-      <label>Staff <select id="staff"></select></label>
+      <label>Cashier <select id="staff"></select></label>
     </div>
+    <p class="hint">Pick the store first. The cashier list comes from the store tool.</p>
   </section>
 
   <section class="card">
-    <h2>2. Customer</h2>
+    <h2>Customer</h2>
     <div class="row">
       <label>Phone <input id="phone" value="+919000000005" /></label>
-      <button id="lookupCustomer">Look up</button>
+      <button id="lookupCustomer">Find customer</button>
     </div>
     <div id="customerInfo" class="info"></div>
     <div id="rxInfo" class="info"></div>
   </section>
 
   <section class="card">
-    <h2>3. Cart</h2>
+    <h2>Cart</h2>
     <div class="row">
-      <label>Frame variant <select id="frameVariant"></select></label>
-      <label>Lens variant <select id="lensVariant"></select></label>
-      <label>RX id (optional) <input id="rxId" placeholder="latest valid" /></label>
+      <label>Frame <select id="frameVariant"></select></label>
+      <label>Lens <select id="lensVariant"></select></label>
+      <label>Prescription <input id="rxId" placeholder="blank = latest valid" /></label>
       <button id="addPair">Add pair</button>
     </div>
     <div id="inventoryInfo" class="info"></div>
-    <table id="cartTable"><thead><tr><th>Frame</th><th>Lens</th><th>RX</th><th></th></tr></thead><tbody></tbody></table>
+    <table id="cartTable">
+      <thead><tr><th>Frame</th><th>Lens</th><th>Prescription</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint">Each pair is one frame and one lens. Add the pair twice for a two-pair bill.</p>
   </section>
 
   <section class="card">
-    <h2>4. Quote</h2>
+    <h2>Quote</h2>
     <div class="row">
-      <label>Channel <select id="channel"><option>walk_in</option><option>whatsapp_booked</option><option>online_pickup</option></select></label>
-      <label>Payment <select id="payment"><option>upi</option><option>card</option><option>cash</option></select></label>
-      <label>Date <input id="saleDate" value="2026-10-27" /></label>
-      <label>Manager % <input id="managerPct" type="number" step="0.5" value="0" /></label>
-      <label>Reason code <input id="reasonCode" /></label>
-      <label>Approver ID <input id="approverId" /></label>
+      <label>Channel
+        <select id="channel">
+          <option value="walk_in">walk-in</option>
+          <option value="whatsapp_booked">WhatsApp booked</option>
+          <option value="online_pickup">online pickup</option>
+        </select>
+      </label>
+      <label>Payment
+        <select id="payment">
+          <option value="upi">UPI</option>
+          <option value="card">card</option>
+          <option value="cash">cash</option>
+        </select>
+      </label>
+      <label>Sale date <input id="saleDate" /></label>
+      <label>Manager % <input id="managerPct" type="number" min="0" max="10" step="0.5" value="0" /></label>
+      <label>Reason code <input id="reasonCode" placeholder="e.g. WALKOUT" /></label>
+      <label>Approver <input id="approverId" placeholder="e.g. S108" /></label>
     </div>
-    <button id="quoteBtn">Quote</button>
-    <pre id="quoteOut"></pre>
+    <button id="quoteBtn">Get quote</button>
+    <div id="quoteOut" class="out"></div>
+    <p class="hint">A quote does not charge anything. Manager discount needs a reason and the approver's staff id.</p>
   </section>
 
   <section class="card">
-    <h2>5. Checkout</h2>
+    <h2>Checkout</h2>
     <div class="row">
       <label>Checkout key <input id="checkoutKey" value="WEB-DEMO-001" /></label>
       <button id="checkoutBtn">Charge and create order</button>
     </div>
-    <pre id="checkoutOut"></pre>
+    <div id="checkoutOut" class="out"></div>
+    <p class="hint">Same key and same cart means resume. A new key means a new bill.</p>
   </section>
 
   <section class="card">
-    <h2>6. Refund</h2>
+    <h2>Refund</h2>
     <div class="row">
-      <label>Invoice <input id="refundInvoice" /></label>
+      <label>Invoice <input id="refundInvoice" placeholder="filled from checkout" /></label>
       <label>Reason <input id="refundReason" value="Customer changed mind" /></label>
       <label>Reason code <input id="refundReasonCode" value="CHANGED_MIND" /></label>
       <label>Refund key <input id="refundKey" value="WEB-REFUND-001" /></label>
-      <button id="refundBtn">Refund</button>
+      <button id="refundBtn">Refund bill</button>
     </div>
-    <pre id="refundOut"></pre>
+    <div id="refundOut" class="out"></div>
+    <p class="hint">Full refund only. The frame goes back to stock, the lens does not.</p>
   </section>
 
   <section class="card">
-    <h2>7. Day-end report</h2>
+    <h2>Day end</h2>
     <div class="row">
       <label>Store <input id="reportStore" value="HSR" /></label>
-      <label>Date <input id="reportDate" value="2026-10-27" /></label>
+      <label>Date <input id="reportDate" /></label>
       <button id="reportBtn">Run report</button>
     </div>
-    <pre id="reportOut"></pre>
+    <div id="reportOut" class="out"></div>
   </section>
 </main>
 
 <script src="/static/app.js"></script>
 </body>
 </html>
-'@ | Set-Content -LiteralPath "C:\Users\Sonali\AppData\Local\Temp\web_index.html" -Encoding utf8
-echo done

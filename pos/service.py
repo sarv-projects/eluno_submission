@@ -93,7 +93,7 @@ class PosService:
             if limits.get("add_required") and add is not None and not float(limits.get("add_min", -999)) <= float(add) <= float(limits.get("add_max", 999)):
                 reasons.append("{} ADD {} outside {} to {} D for this lens".format(eye_name.upper(), add, limits.get("add_min"), limits.get("add_max")))
             if axis is not None and (int(axis) < 0 or int(axis) > 180): reasons.append("{} axis {} outside 0–180°; verify source prescription".format(eye_name.upper(), axis))
-            elif axis is not None and int(axis) % 5: reasons.append("{} axis {}° is not on 5° grid; do not round at till—ask optometrist to confirm".format(eye_name.upper(), axis))
+            elif axis is not None and int(axis) % 5: reasons.append("{} axis {}° is not on 5° grid; do not round at the till, ask the optometrist to confirm".format(eye_name.upper(), axis))
         if reasons:
             raise DomainError("Prescription {} cannot be dispensed with {} index {} / {}:\n - {}".format(rx["rx_id"], lens.get("lens_type"), lens.get("index"), lens.get("coating"), "\n - ".join(reasons)))
 
@@ -422,4 +422,4 @@ class PosService:
             method=attr(order,"payment_method") or "unknown"
             refunds_by_method[method]=refunds_by_method.get(method,0)+amount
             bucket(attr(order,"channel") or "unknown")["refunds_paise"]+=amount
-        return {"store_code":store_code,"location_id":int(location["id"]),"business_date":day.isoformat(),"bill_count":len(bills),"gross_paise":gross,"discounts_paise":discounts,"net_sales_paise":net_sales,"taxable_paise":taxable,"tax_paise":tax,"refunds_paise":refunds,"refund_taxable_paise":refund_taxable,"refund_tax_paise":refund_tax,"net_after_refunds_paise":net_sales-refunds,"payments_by_method_paise":payments,"refunds_by_method_paise":refunds_by_method,"by_channel":channels,"shopify_order_numbers":[x.get("order_number") for x in bills],"notes":["Refunds are reported on their local refund date; source is Shopify.","Channel split uses the channel stored on each Shopify order.","Mock orders endpoint has no pagination and returns at most 250 orders."]}
+        return {"store_code":store_code,"location_id":int(location["id"]),"business_date":day.isoformat(),"bill_count":len(bills),"gross_paise":gross,"discounts_paise":discounts,"net_sales_paise":net_sales,"taxable_paise":taxable,"tax_paise":tax,"refunds_paise":refunds,"refund_taxable_paise":refund_taxable,"refund_tax_paise":refund_tax,"net_after_refunds_paise":net_sales-refunds,"payments_by_method_paise":payments,"refunds_by_method_paise":refunds_by_method,"by_channel":channels,"shopify_order_numbers":[x.get("order_number") for x in bills],"notes":["refunds count on the day they happened, numbers come from Shopify","channel comes from the channel saved on each order","the mock order list stops at 250, so older bills can be missed"]}

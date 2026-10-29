@@ -43,8 +43,10 @@ def _eligible(offer, lines, customer_tags, sale_date, staff, manager_percent, re
         return False, "requires a frame and lens in the same pair"
     req = rule.get("requires", {})
     if req:
-        if not manager_percent or not (0 < manager_percent <= int(rule["discount"].get("value_bps_max", 0))):
-            return False, "manager discount must be requested within the configured limit"
+        if not manager_percent:
+            return False, "manager discount was not requested"
+        if not (0 < manager_percent <= int(rule["discount"].get("value_bps_max", 0))):
+            return False, "manager discount is above the limit for this store"
         if not staff or staff.get("role") != req.get("role") or not staff.get("can_override_discount"):
             return False, "requires an authorized store manager"
         if not reason_code or not approver_id:
@@ -115,7 +117,7 @@ def _apply_offer(offer, lines, balances, requested_manager_percent=0):
             alloc = _allocate_flat(int(cap), indices, {i: balances[i] for i in range(len(lines))})
     elif discount["type"] == "flat":
         flat = int(discount["value_paise"])
-        # Pair-scoped flat discounts are per qualifying pair.
+        # pair offers give the flat amount to each complete pair
         if offer["rule"].get("applies_to") == "pair":
             groups = {}
             for i in indices:
@@ -128,7 +130,7 @@ def _apply_offer(offer, lines, balances, requested_manager_percent=0):
             alloc = _allocate_flat(flat, indices, {i: balances[i] for i in range(len(lines))})
     else:
         raise OfferError("unsupported discount type: {}".format(discount.get("type")))
-    # A flat amount may not exceed remaining line amounts.
+    # never take more than the line still has
     return {i: min(p, balances[i]) for i, p in alloc.items() if p > 0}
 
 
@@ -206,11 +208,11 @@ def evaluate_offers(lines, offers, customer_tags, sale_date, staff=None,
     for offer in eligible:
         if offer["offer_id"] not in applied_ids:
             explanations.append({"offer_id": offer["offer_id"], "applied": False,
-                                 "why": "not selected: a higher-saving permitted offer combination was chosen"})
+                                 "why": "not applied, another allowed combination saved more"})
     for x in applied:
-        why = ("manager override requested and approved by {}".format(approver_id)
+        why = ("manager override, approved by {}".format(approver_id)
                if mandatory is not None and x["offer_id"] == mandatory.get("offer_id")
-               else "selected under maximum-savings rule")
+               else "applied, it saved the most")
         explanations.append({"offer_id": x["offer_id"], "applied": True,
                              "why": why, "amount_paise": x["amount_paise"]})
     return {"applied": applied, "line_allocations": line_allocs,

@@ -1,3 +1,6 @@
+# web front end for the till, serves the page and a small json api
+# runs the mock in the same process so one command is enough
+
 import json
 import os
 import sys

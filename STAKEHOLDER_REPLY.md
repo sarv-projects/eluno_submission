@@ -21,7 +21,7 @@ The email says 72 hours, but the attached brief says 48. Please confirm the dead
 
 ## What I’d build and leave out
 
-For the exercise I built customer lookup, prescription and lens checks, offers, per-line GST, terminal payment, the Shopify order with an Eluno invoice number, full refunds with frame-only restocking, and a Shopify-based day-end report. A terminal app is enough here; the brief does not score a screen.
+For the exercise I built customer lookup, prescription and lens checks, offers, per-line GST, terminal payment, the Shopify order with an Eluno invoice number, full refunds with frame-only restocking, and a Shopify-based day-end report. The brief changed part way through to require a working screen, so the same flow now runs from a browser page; the command line still works too.
 
 I left family billing, remakes, partial refunds and cash-drawer sessions out. Each needs policy the mock does not provide: who owns a family order, how remake costs are approved, how partial credit notes work, and how the till float is counted and reconciled. I also left out the 10 a.m. email until the day-end numbers are trusted. The queue beverage question and Indiranagar camera issue belong to other tools, not this billing change.
 

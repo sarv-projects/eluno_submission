@@ -1,6 +1,6 @@
 # Eluno POS architecture
 
-Diagram one is the current setup described in the brief. Diagram two is what I built. Dotted arrows mark connections the brief does not explain or that this exercise does not implement.
+Diagram one is the current setup described in the brief. Diagram two is what I built. Dotted arrows mark connections the brief does not explain or that this exercise leaves out.
 
 ## Current setup
 
@@ -35,13 +35,13 @@ flowchart LR
 
 ## What this exercise builds
 
-The app runs from the terminal. Workflows call the external APIs through `pos/adapters.py`; pricing and validation use plain dictionaries and integer paise, not Shopify objects.
+The browser page and the CLI both call the same workflows in `pos/service.py`. `server.py` serves the page, a small JSON API and the mock, so one process covers the whole demo. Workflows reach the outside world through `pos/adapters.py`; pricing and validation use plain dictionaries and integer paise, never Shopify objects.
 
 ```mermaid
 flowchart LR
     Staff[Store staff]
-    subgraph POS[Eluno POS — terminal app]
-        Commands[quote · checkout · refund · report]
+    subgraph POS[Eluno POS — till app]
+        Commands[Browser page and CLI<br/>quote · checkout · refund · report]
         Workflow[Application workflows<br/>customer/Rx · quote · checkout recovery<br/>full refund · day-end]
         Domain[Domain rules<br/>Rx/lens validation · offer selection<br/>inclusive GST · invoice metadata]
         Adapters[HTTP adapters<br/>Shopify · SMT · terminal]

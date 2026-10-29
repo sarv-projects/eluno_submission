@@ -1,37 +1,82 @@
-const $ = (id) => document.getElementById(id);
-const state = { customer: null, prescriptions: [], cart: [], locations: [], frames: [], lenses: [] };
+// browser side of the till. talks to server.py, which runs the mock too.
+// plain js, no build step. keep it readable for whoever picks this up next.
 
-async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
-  const text = await res.text();
+const $ = (id) => document.getElementById(id);
+const state = { locations: [], cart: [] };
+
+function money(paise) {
+  const v = Math.abs(Number(paise) || 0);
+  const rupees = Math.floor(v / 100).toLocaleString("en-IN");
+  return (Number(paise) < 0 ? "-" : "") + "\u20b9" + rupees + "." + String(v % 100).padStart(2, "0");
+}
+
+function today() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + m + "-" + day;
+}
+
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function text(el, message) {
+  const node = $(el);
+  node.className = "out";
+  node.textContent = message;
+}
+
+function html(el, markup) {
+  const node = $(el);
+  node.className = "out";
+  node.innerHTML = markup;
+}
+
+function fail(el, message) {
+  const node = $(el);
+  node.className = "out error";
+  node.textContent = message;
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const raw = await res.text();
   let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: text }; }
+  try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = { error: raw }; }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
 
-function show(el, value) {
-  const node = $(el);
-  if (typeof value === "string") node.textContent = value;
-  else node.textContent = JSON.stringify(value, null, 2);
+function post(path, body) {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
-async function loadLocations() {
+async function loadStores() {
   const data = await api("/api/locations");
-  state.locations = data.locations || [];
+  // only real stores can bill, HQ is a lab location
+  state.locations = (data.locations || []).filter((loc) => (loc.eluno || {}).kind === "store");
   const sel = $("store");
   sel.innerHTML = "";
   state.locations.forEach((loc) => {
+    const code = loc.eluno.store_code;
     const opt = document.createElement("option");
-    opt.value = loc.eluno.store_code;
-    opt.textContent = loc.eluno.store_code + " - " + loc.name;
+    opt.value = code;
+    opt.textContent = code + " - " + loc.name;
     sel.appendChild(opt);
   });
-  await loadStaff();
+  if (state.locations.some((loc) => loc.eluno.store_code === "HSR")) sel.value = "HSR";
+  await loadCashiers();
   await loadCatalog();
 }
 
-async function loadStaff() {
+async function loadCashiers() {
   const store = $("store").value;
   const data = await api("/api/staff?store=" + encodeURIComponent(store));
   const sel = $("staff");
@@ -48,156 +93,227 @@ async function loadStaff() {
 async function loadCatalog() {
   const frames = await api("/api/products?product_type=Frame");
   const lenses = await api("/api/products?product_type=Lens");
-  state.frames = frames.products || [];
-  state.lenses = lenses.products || [];
-  const fSel = $("frameVariant");
-  fSel.innerHTML = "";
-  state.frames.forEach((p) => (p.variants || []).forEach((v) => {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    opt.textContent = p.title + " / " + v.title + " (" + v.sku + ")";
-    fSel.appendChild(opt);
-  }));
-  const lSel = $("lensVariant");
-  lSel.innerHTML = "";
-  state.lenses.forEach((p) => (p.variants || []).forEach((v) => {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    opt.textContent = p.title + " / " + v.title + " (" + v.sku + ")";
-    lSel.appendChild(opt);
-  }));
+  fillVariants($("frameVariant"), frames.products || []);
+  fillVariants($("lensVariant"), lenses.products || []);
 }
 
-async function lookupCustomer() {
+function fillVariants(select, products) {
+  select.innerHTML = "";
+  products.forEach((product) => {
+    (product.variants || []).forEach((variant) => {
+      const opt = document.createElement("option");
+      opt.value = variant.id;
+      opt.textContent = product.title + " / " + variant.title + " (" + variant.sku + ")";
+      opt.dataset.label = product.title + " " + variant.title;
+      opt.dataset.item = variant.inventory_item_id || "";
+      select.appendChild(opt);
+    });
+  });
+}
+
+async function findCustomer() {
   const phone = $("phone").value.trim();
-  const data = await api("/api/customers?phone=" + encodeURIComponent(phone));
-  const customers = data.customers || [];
-  if (!customers.length) { show("customerInfo", "No customer found"); state.customer = null; return; }
-  const c = customers[0];
-  state.customer = c;
-  show("customerInfo", c.first_name + " " + c.last_name + " (id " + c.id + ") tags: " + (c.tags || ""));
-  const rxData = await api("/api/prescriptions?phone=" + encodeURIComponent(phone));
-  state.prescriptions = rxData.prescriptions || [];
-  const lines = state.prescriptions.map((r) => r.rx_id + " valid until " + r.valid_until + " (" + r.source + ")");
-  show("rxInfo", lines.length ? "Prescriptions:\n" + lines.join("\n") : "No prescriptions");
+  try {
+    const data = await api("/api/customers?phone=" + encodeURIComponent(phone));
+    const customers = data.customers || [];
+    if (!customers.length) {
+      text("customerInfo", "No customer with that phone number.");
+      text("rxInfo", "");
+      return;
+    }
+    const c = customers[0];
+    text("customerInfo", [c.first_name, c.last_name].filter(Boolean).join(" ") +
+      "  |  id " + c.id + "  |  tags: " + (c.tags || "none"));
+    const rxData = await api("/api/prescriptions?phone=" + encodeURIComponent(phone));
+    const rows = (rxData.prescriptions || []).map((rx) =>
+      rx.rx_id + "  valid until " + rx.valid_until + "  (" + rx.source + ")");
+    text("rxInfo", rows.length ? "Prescriptions:\n" + rows.join("\n") : "No prescriptions on file.");
+  } catch (e) {
+    fail("customerInfo", e.message);
+  }
 }
 
-async function addPair() {
-  const frameId = parseInt($("frameVariant").value, 10);
-  const lensId = parseInt($("lensVariant").value, 10);
-  const rxId = $("rxId").value.trim() || null;
-  state.cart.push({ frame: frameId, lens: lensId, rx: rxId });
+function addPair() {
+  const frameSelect = $("frameVariant");
+  const lensSelect = $("lensVariant");
+  if (!frameSelect.value || !lensSelect.value) return;
+  state.cart.push({
+    frame: Number(frameSelect.value),
+    lens: Number(lensSelect.value),
+    rx: $("rxId").value.trim() || null,
+    item: frameSelect.selectedOptions[0].dataset.item,
+    frameLabel: frameSelect.selectedOptions[0].dataset.label,
+    lensLabel: lensSelect.selectedOptions[0].dataset.label,
+  });
   renderCart();
-  await refreshInventory();
+  refreshStock();
 }
 
 function renderCart() {
-  const tbody = $("cartTable").querySelector("tbody");
-  tbody.innerHTML = "";
-  state.cart.forEach((p, i) => {
+  const body = $("cartTable").querySelector("tbody");
+  body.innerHTML = "";
+  if (!state.cart.length) {
+    body.innerHTML = "<tr><td colspan='4' class='hint'>Cart is empty. Add a pair above.</td></tr>";
+    return;
+  }
+  state.cart.forEach((pair, i) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = "<td>" + p.frame + "</td><td>" + p.lens + "</td><td>" + (p.rx || "latest") + "</td><td><button data-i='" + i + "' class='remove'>x</button></td>";
-    tbody.appendChild(tr);
+    tr.innerHTML =
+      "<td>" + esc(pair.frameLabel) + "</td>" +
+      "<td>" + esc(pair.lensLabel) + "</td>" +
+      "<td>" + esc(pair.rx || "latest valid") + "</td>" +
+      "<td><button class='link' data-i='" + i + "'>remove</button></td>";
+    body.appendChild(tr);
   });
-  tbody.querySelectorAll(".remove").forEach((b) => b.addEventListener("click", (e) => {
-    state.cart.splice(parseInt(e.target.dataset.i, 10), 1);
-    renderCart();
-  }));
+  body.querySelectorAll("button.link").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.cart.splice(Number(btn.dataset.i), 1);
+      renderCart();
+      refreshStock();
+    });
+  });
 }
 
-async function refreshInventory() {
+async function refreshStock() {
+  if (!state.cart.length) { text("inventoryInfo", ""); return; }
   const store = $("store").value;
-  const loc = state.locations.find((l) => l.eluno.store_code === store);
+  const loc = state.locations.find((x) => (x.eluno || {}).store_code === store);
   if (!loc) return;
-  const ids = state.cart.map((p) => p.frame);
-  if (!ids.length) { show("inventoryInfo", ""); return; }
-  const data = await api("/api/inventory?item_ids=" + ids.join(",") + "&location_id=" + loc.id);
-  const lines = (data.inventory_levels || []).map((l) => "item " + l.inventory_item_id + ": " + l.available + " available");
-  show("inventoryInfo", lines.join("\n"));
-}
-
-function pairsPayload() {
-  return state.cart.map((p) => [p.frame, p.lens, p.rx]);
-}
-
-async function quote() {
+  const itemIds = state.cart.map((p) => p.item).filter(Boolean).join(",");
+  if (!itemIds) { text("inventoryInfo", ""); return; }
   try {
-    const data = await api("/api/quote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: $("phone").value.trim(),
-        store: $("store").value,
-        staff: $("staff").value,
-        pairs: pairsPayload(),
-        channel: $("channel").value,
-        payment: $("payment").value,
-        date: $("saleDate").value,
-        manager_percent: Math.round(parseFloat($("managerPct").value || "0") * 100),
-        reason_code: $("reasonCode").value.trim() || null,
-        approver_id: $("approverId").value.trim() || null,
-      }),
+    const data = await api("/api/inventory?item_ids=" + itemIds + "&location_id=" + loc.id);
+    const rows = (data.inventory_levels || []).map((row) =>
+      "frame item " + row.inventory_item_id + ": " + row.available + " in stock");
+    text("inventoryInfo", rows.join("\n"));
+  } catch (e) {
+    text("inventoryInfo", "");
+  }
+}
+
+function billBody() {
+  return {
+    phone: $("phone").value.trim(),
+    store: $("store").value,
+    staff: $("staff").value,
+    pairs: state.cart.map((p) => [p.frame, p.lens, p.rx]),
+    channel: $("channel").value,
+    payment: $("payment").value,
+    date: $("saleDate").value,
+    manager_percent: Math.round(parseFloat($("managerPct").value || "0") * 100),
+    reason_code: $("reasonCode").value.trim() || null,
+    approver_id: $("approverId").value.trim() || null,
+  };
+}
+
+function renderQuote(q) {
+  const lines = (q.lines || []).map((line) =>
+    "<tr><td>" + esc(line.description) + " <span class='tag'>" + esc(line.line_type) + "</span></td>" +
+    "<td>" + money(line.gross_paise) + "</td>" +
+    "<td>" + money(line.discount_paise) + "</td>" +
+    "<td>" + money(line.taxable_paise) + "</td>" +
+    "<td>" + money(line.cgst_paise) + "</td>" +
+    "<td>" + money(line.sgst_paise) + "</td></tr>").join("");
+
+  const applied = (q.offers || []).map((o) =>
+    "<li>" + esc(o.name) + " (" + esc(o.offer_id) + ") <b>" + money(o.amount_paise) + "</b></li>").join("");
+  const skipped = (q.offer_explanations || [])
+    .filter((x) => !x.applied)
+    .map((x) => "<li>" + esc(x.offer_id) + ": " + esc(x.why) + "</li>").join("");
+
+  html("quoteOut",
+    "<table><thead><tr><th>Item</th><th>Price</th><th>Discount</th><th>Taxable</th><th>CGST</th><th>SGST</th></tr></thead>" +
+    "<tbody>" + lines + "</tbody></table>" +
+    "<p class='total'>To pay: <b>" + money(q.total_paise) + "</b></p>" +
+    "<p class='hint'>Gross " + money(q.gross_paise) + ", discounts " + money(q.discount_paise) +
+    ", tax " + money(q.tax_paise) + "</p>" +
+    "<p><b>Offers applied</b></p><ul>" + (applied || "<li>none</li>") + "</ul>" +
+    (skipped ? "<p><b>Not applied</b></p><ul class='hint'>" + skipped + "</ul>" : ""));
+}
+
+async function getQuote() {
+  if (!state.cart.length) { fail("quoteOut", "Add at least one pair first."); return; }
+  try {
+    renderQuote(await post("/api/quote", billBody()));
+  } catch (e) {
+    fail("quoteOut", e.message);
+  }
+}
+
+async function doCheckout() {
+  if (!state.cart.length) { fail("checkoutOut", "Add at least one pair first."); return; }
+  const body = billBody();
+  body.checkout_key = $("checkoutKey").value.trim() || null;
+  try {
+    const result = await post("/api/checkout", body);
+    html("checkoutOut",
+      "<p><b>Invoice " + esc(result.invoice_no) + "</b></p>" +
+      "<p>Shopify order " + esc(result.shopify_order_number) + " (id " + esc(result.shopify_order_id) + ")</p>" +
+      "<p>Charged " + money(result.total_paise) + " on terminal, charge " + esc(result.charge_id) + "</p>" +
+      "<p class='hint'>Status: " + esc(result.status) + "</p>");
+    if (result.invoice_no) $("refundInvoice").value = result.invoice_no;
+  } catch (e) {
+    fail("checkoutOut", e.message);
+  }
+}
+
+async function doRefund() {
+  const invoice = $("refundInvoice").value.trim();
+  if (!invoice) { fail("refundOut", "Enter the invoice number to refund."); return; }
+  try {
+    const result = await post("/api/refund", {
+      invoice: invoice,
+      store: $("store").value,
+      reason: $("refundReason").value.trim(),
+      reason_code: $("refundReasonCode").value.trim(),
+      refund_key: $("refundKey").value.trim() || null,
     });
-    show("quoteOut", data);
-  } catch (e) { show("quoteOut", "Error: " + e.message); }
+    html("refundOut",
+      "<p><b>Credit note " + esc(result.credit_note_no) + "</b></p>" +
+      "<p>Refunded " + money(result.amount_paise) + " for invoice " + esc(result.invoice_no) + "</p>" +
+      "<p class='hint'>Frame restocked, lens not. Status: " + esc(result.status) + "</p>");
+  } catch (e) {
+    fail("refundOut", e.message);
+  }
 }
 
-async function checkout() {
+async function runReport() {
   try {
-    const data = await api("/api/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: $("phone").value.trim(),
-        store: $("store").value,
-        staff: $("staff").value,
-        pairs: pairsPayload(),
-        channel: $("channel").value,
-        payment: $("payment").value,
-        date: $("saleDate").value,
-        manager_percent: Math.round(parseFloat($("managerPct").value || "0") * 100),
-        reason_code: $("reasonCode").value.trim() || null,
-        approver_id: $("approverId").value.trim() || null,
-        checkout_key: $("checkoutKey").value.trim() || null,
-      }),
-    });
-    show("checkoutOut", data);
-    if (data.invoice_no) $("refundInvoice").value = data.invoice_no;
-  } catch (e) { show("checkoutOut", "Error: " + e.message); }
+    const store = encodeURIComponent($("reportStore").value);
+    const day = encodeURIComponent($("reportDate").value);
+    const r = await api("/api/report?store=" + store + "&date=" + day);
+    const methods = Object.entries(r.payments_by_method_paise || {})
+      .map(([k, v]) => "<li>" + esc(k) + ": " + money(v) + "</li>").join("");
+    const channels = Object.entries(r.by_channel || {})
+      .map(([k, v]) => "<tr><td>" + esc(k) + "</td><td>" + v.bill_count + "</td><td>" +
+        money(v.net_sales_paise) + "</td><td>" + money(v.refunds_paise) + "</td></tr>").join("");
+    html("reportOut",
+      "<p><b>" + esc(r.store_code) + " on " + esc(r.business_date) + "</b> - " + r.bill_count +
+      (r.bill_count === 1 ? " bill" : " bills") + "</p>" +
+      "<p>Gross " + money(r.gross_paise) + " | discounts " + money(r.discounts_paise) +
+      " | net " + money(r.net_sales_paise) + "</p>" +
+      "<p>Taxable " + money(r.taxable_paise) + " | tax " + money(r.tax_paise) +
+      " | refunds " + money(r.refunds_paise) + "</p>" +
+      "<p><b>By payment</b></p><ul>" + (methods || "<li>none</li>") + "</ul>" +
+      "<table><thead><tr><th>Channel</th><th>Bills</th><th>Net</th><th>Refunds</th></tr></thead><tbody>" +
+      (channels || "<tr><td colspan='4'>no bills</td></tr>") + "</tbody></table>");
+  } catch (e) {
+    fail("reportOut", e.message);
+  }
 }
 
-async function refund() {
-  try {
-    const data = await api("/api/refund", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        invoice: $("refundInvoice").value.trim(),
-        store: $("store").value,
-        reason: $("refundReason").value.trim(),
-        reason_code: $("refundReasonCode").value.trim(),
-        refund_key: $("refundKey").value.trim() || null,
-      }),
-    });
-    show("refundOut", data);
-  } catch (e) { show("refundOut", "Error: " + e.message); }
-}
-
-async function report() {
-  try {
-    const data = await api("/api/report?store=" + encodeURIComponent($("reportStore").value) + "&date=" + encodeURIComponent($("reportDate").value));
-    show("reportOut", data);
-  } catch (e) { show("reportOut", "Error: " + e.message); }
-}
-
-$("store").addEventListener("change", async () => { await loadStaff(); await refreshInventory(); });
-$("lookupCustomer").addEventListener("click", lookupCustomer);
+$("store").addEventListener("change", async () => {
+  await loadCashiers();
+  refreshStock();
+});
+$("lookupCustomer").addEventListener("click", findCustomer);
 $("addPair").addEventListener("click", addPair);
-$("quoteBtn").addEventListener("click", quote);
-$("checkoutBtn").addEventListener("click", checkout);
-$("refundBtn").addEventListener("click", refund);
-$("reportBtn").addEventListener("click", report);
+$("quoteBtn").addEventListener("click", getQuote);
+$("checkoutBtn").addEventListener("click", doCheckout);
+$("refundBtn").addEventListener("click", doRefund);
+$("reportBtn").addEventListener("click", runReport);
 
-loadLocations().then(lookupCustomer);
-'@ | Set-Content -LiteralPath "C:\Users\Sonali\AppData\Local\Temp\web_app.js" -Encoding utf8
-echo done
+$("saleDate").value = today();
+$("reportDate").value = today();
+renderCart();
+loadStores().then(findCustomer).catch((e) => fail("customerInfo", e.message));

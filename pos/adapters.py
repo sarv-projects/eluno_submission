@@ -16,7 +16,7 @@ class ApiError(RuntimeError):
 
 
 class AmbiguousRemoteError(RuntimeError):
-    """A write may have reached the remote system; reconcile before retry."""
+    # the write may have landed, so the caller reconciles before retrying
     pass
 
 
