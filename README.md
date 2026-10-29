@@ -103,6 +103,8 @@ The page and the mock run in one process, so a single free web service is enough
 
 On Render: create a Web Service from this repo, set the start command to `python3 server.py`, and skip the build step. The platform sets `PORT`.
 
+Live demo: _add the deployed URL here before submitting._
+
 ## Decisions and limits
 
 Money stays in paise inside the app and becomes decimal strings only at the Shopify boundary. Offers follow the rules in `offers.json`: stackable offers can combine, non-stackable ones compete alone, and the combination with the biggest saving wins. A manager discount that was asked for has to be applied, and because its rule is non-stackable it replaces the automatic offers.
@@ -118,14 +120,22 @@ Limits worth knowing:
 - This is not offline billing. A dropped network leaves a pending intent; it does not let the till take payment offline.
 - The mock has no real staff login, so a manager approval is recorded, not authenticated.
 
-## Where AI helped and where it misled me
+## Where AI tools helped and where they misled me
 
-AI was useful for boilerplate, test ideas and a first pass at the browser page. It also got things wrong that I had to catch:
+**Where I used them.** Building the browser UI was the main one: the HTML, the CSS, and the JavaScript that calls the API. I also used AI for first drafts of some tests and for tightening wording in this README and the stakeholder reply.
 
-- It wrote README text saying the quote showed both the automatic and the manager-discount totals. The app didn't do that, so I checked the code and fixed the wording.
-- Its first version of the browser files had leftover shell lines pasted at the end of the JavaScript, which broke the page completely. I only found that by loading the page in a browser and checking the console.
+**What stayed with me.** The design and the coding. I decided the screen flow, which steps a cashier works through and in what order, what the page shows and what it hides behind a hint. I wrote the domain logic that matters: paise-only money, the offer precedence rules, the invoice and credit-note counters, and the checkout/refund recovery states. Where AI produced code I read it, ran it, and changed it, and where it produced prose I cut most of it.
 
-So I treat AI output as a draft to verify, not as proof that something works. Everything described here was run.
+**Where it got things wrong.** All of these were found by running the thing, not by reading what the AI said about it:
+
+- It told me the UI was done. It had never been opened in a browser. The first version had leftover shell lines pasted at the end of `app.js`, which is a syntax error, so none of the JavaScript ran. I found it by loading the page and watching the console.
+- It wrote README text saying the quote showed both the automatic and the manager-discount totals. The app never did that.
+- The cart sent variant ids to the inventory endpoint, which expects inventory item ids. Stock showed blank every time, and it never noticed because it only tested the API, not the page.
+- It listed the HQ lab as a billable store, and defaulted the till to the wrong branch instead of HSR.
+- The quote said "manager discount must be requested within the configured limit" even when nobody had asked for a manager discount. Wrong message, and confusing on the floor.
+- The day-end line read "1 bills".
+
+I treat AI output as a draft to verify, not as evidence that something works. Everything described in this README was run against the mock.
 
 ## Tests
 
