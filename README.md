@@ -44,6 +44,21 @@ PORT=19000 DB=/tmp/eluno-demo.sqlite3 ./run_demo.sh
 
 The tests start their own mock. No separate server is needed for either command.
 
+## Run the web UI
+
+The browser UI runs the same flow from a screen:
+
+```bash
+python3 server.py
+```
+
+Then open http://127.0.0.1:8000. The server also serves the mock, so one process is enough. Set `PORT` and `DB` to change the port or database file.
+
+The UI covers customer lookup, cart and lens validation, quote, checkout, refund and the day-end report.
+
+## Hosting
+
+The app is meant to run on a free tier with the mock in the same process. `Procfile`, `requirements.txt` and `runtime.txt` are included for Render, Railway or similar. The mock state resets when the service restarts, which is fine for a demo.
 ## Run a command separately
 
 Start the mock in one terminal:
@@ -107,8 +122,12 @@ Some limits come from the mock; others come from keeping this a local, single-pr
 
 One mismatch in the exercise materials: the email says 72 hours, the brief says 48. I asked about it in `STAKEHOLDER_REPLY.md`.
 
+## Where AI tools helped and misled me
+
+AI helped with boilerplate and test ideas. It also suggested README wording that claimed the quote showed both automatic and manager-discount totals; the app did not do that, so I checked the code and corrected it. I treat AI output as a draft to verify, not as proof.
 ## Tests
 
 `python3 -m unittest discover -v` runs 14 tests covering tax and rounding, offer selection, second-pair discounts, manager authorization, prescription validation, checkout replay, refund/restock behaviour, channel reporting and 429/503 retries. The supplied fixtures also pass `python3 starter-kit/validate_seed.py`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagrams and [STAKEHOLDER_REPLY.md](STAKEHOLDER_REPLY.md) for the Part A response.
+

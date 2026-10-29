@@ -20,3 +20,7 @@ dist/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+
+# web app database
+pos_web.sqlite3
+
