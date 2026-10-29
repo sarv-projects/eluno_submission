@@ -99,9 +99,19 @@ A few things worth knowing:
 
 ## Hosting
 
-The page and the mock run in one process, so a single free web service is enough. `Procfile`, `requirements.txt` and `runtime.txt` are included for Render or Railway.
+The page and the mock run in one process, so one free web service is enough. Nothing to install: `requirements.txt` is intentionally empty because the app is standard library only.
 
-On Render: create a Web Service from this repo, set the start command to `python3 server.py`, and skip the build step. The platform sets `PORT`.
+On Render, either:
+
+- **Blueprint:** New > Blueprint, pick this repo. `render.yaml` sets the start command and health check.
+- **Manual:** New > Web Service, pick this repo, runtime Python, build command `pip install -r requirements.txt`, start command `python3 -u server.py`. Render sets `PORT` itself, so don't hardcode it.
+
+Two things to expect on the free tier:
+
+- It sleeps after a while idle, so the first hit takes 30-60 seconds to wake. Open the URL once before recording anything.
+- The disk is temporary. A restart resets the mock and the SQLite file together, so invoice numbers go back to `00003` and the day-end report starts empty. That is fine for a demo, but don't be surprised by it.
+
+`Procfile` is there for Railway or Heroku style hosts; Render uses the start command above.
 
 Live demo: _add the deployed URL here before submitting._
 

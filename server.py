@@ -186,5 +186,5 @@ class WebHandler(mock.H):
 
 
 if __name__ == "__main__":
-    print("Eluno POS web app + mock on http://localhost:{}".format(PORT))
+    print("Eluno POS web app + mock on http://localhost:{}".format(PORT), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), WebHandler).serve_forever()
