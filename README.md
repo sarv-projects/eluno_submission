@@ -56,9 +56,18 @@ Then open http://127.0.0.1:8000. The server also serves the mock, so one process
 
 The UI covers customer lookup, cart and lens validation, quote, checkout, refund and the day-end report.
 
-## Hosting
+## Hosting on a free tier
 
-The app is meant to run on a free tier with the mock in the same process. `Procfile`, `requirements.txt` and `runtime.txt` are included for Render, Railway or similar. The mock state resets when the service restarts, which is fine for a demo.
+The app and mock run in one process, so a single free web service is enough. Files for Render, Railway or similar are included: `Procfile`, `requirements.txt`, `runtime.txt`.
+
+Render steps:
+1. Create a new Web Service from this GitHub repo.
+2. Build command: (leave blank or `pip install -r requirements.txt`).
+3. Start command: `python3 server.py`.
+4. Add environment variable `PORT` if the platform does not set it (Render sets it).
+5. Deploy and open the service URL.
+
+I did not have account credentials available in this environment, so I could not complete a live deployment from here; the repo is ready to deploy with those steps.
 ## Run a command separately
 
 Start the mock in one terminal:
@@ -130,4 +139,5 @@ AI helped with boilerplate and test ideas. It also suggested README wording that
 `python3 -m unittest discover -v` runs 14 tests covering tax and rounding, offer selection, second-pair discounts, manager authorization, prescription validation, checkout replay, refund/restock behaviour, channel reporting and 429/503 retries. The supplied fixtures also pass `python3 starter-kit/validate_seed.py`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the diagrams and [STAKEHOLDER_REPLY.md](STAKEHOLDER_REPLY.md) for the Part A response.
+
 
