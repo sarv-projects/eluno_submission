@@ -16,7 +16,7 @@
 
 <main>
   <section class="card">
-    <h2>Store and cashier</h2>
+    <h2>1 &middot; Store and cashier</h2>
     <div class="row">
       <label>Store <select id="store"></select></label>
       <label>Cashier <select id="staff"></select></label>
@@ -25,7 +25,7 @@
   </section>
 
   <section class="card">
-    <h2>Customer</h2>
+    <h2>2 &middot; Customer</h2>
     <div class="row">
       <label>Phone <input id="phone" value="+919000000005" /></label>
       <button id="lookupCustomer">Find customer</button>
@@ -35,7 +35,7 @@
   </section>
 
   <section class="card">
-    <h2>Cart</h2>
+    <h2>3 &middot; Cart</h2>
     <div class="row">
       <label>Frame <select id="frameVariant"></select></label>
       <label>Lens <select id="lensVariant"></select></label>
@@ -51,7 +51,7 @@
   </section>
 
   <section class="card">
-    <h2>Quote</h2>
+    <h2>4 &middot; Quote</h2>
     <div class="row">
       <label>Channel
         <select id="channel">
@@ -68,17 +68,22 @@
         </select>
       </label>
       <label>Sale date <input id="saleDate" /></label>
-      <label>Manager % <input id="managerPct" type="number" min="0" max="10" step="0.5" value="0" /></label>
-      <label>Reason code <input id="reasonCode" placeholder="e.g. WALKOUT" /></label>
-      <label>Approver <input id="approverId" placeholder="e.g. S108" /></label>
+      <button id="quoteBtn">Get quote</button>
     </div>
-    <button id="quoteBtn">Get quote</button>
+    <div class="sub">
+      <p class="sub-title">Manager override (leave at 0 for normal billing)</p>
+      <div class="row">
+        <label>Discount % <input id="managerPct" type="number" min="0" max="10" step="0.5" value="0" /></label>
+        <label>Reason code <input id="reasonCode" placeholder="e.g. WALKOUT" /></label>
+        <label>Approver <input id="approverId" placeholder="e.g. S108" /></label>
+      </div>
+    </div>
     <div id="quoteOut" class="out"></div>
-    <p class="hint">A quote does not charge anything. Manager discount needs a reason and the approver's staff id.</p>
+    <p class="hint">A quote does not charge anything. A manager discount needs a reason code and the approver's staff id.</p>
   </section>
 
   <section class="card">
-    <h2>Checkout</h2>
+    <h2>5 &middot; Checkout</h2>
     <div class="row">
       <label>Checkout key <input id="checkoutKey" value="WEB-DEMO-001" /></label>
       <button id="checkoutBtn">Charge and create order</button>
@@ -87,8 +92,8 @@
     <p class="hint">Same key and same cart means resume. A new key means a new bill.</p>
   </section>
 
-  <section class="card">
-    <h2>Refund</h2>
+  <section class="card" id="refundCard">
+    <h2>6 &middot; Refund</h2>
     <div class="row">
       <label>Invoice <input id="refundInvoice" placeholder="filled from checkout" /></label>
       <label>Reason <input id="refundReason" value="Customer changed mind" /></label>
@@ -101,9 +106,9 @@
   </section>
 
   <section class="card">
-    <h2>Day end</h2>
+    <h2>7 &middot; Day end</h2>
     <div class="row">
-      <label>Store <input id="reportStore" value="HSR" /></label>
+      <label>Store <select id="reportStore"></select></label>
       <label>Date <input id="reportDate" /></label>
       <button id="reportBtn">Run report</button>
     </div>

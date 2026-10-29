@@ -63,15 +63,19 @@ async function loadStores() {
   // only real stores can bill, HQ is a lab location
   state.locations = (data.locations || []).filter((loc) => (loc.eluno || {}).kind === "store");
   const sel = $("store");
+  const report = $("reportStore");
   sel.innerHTML = "";
+  report.innerHTML = "";
   state.locations.forEach((loc) => {
     const code = loc.eluno.store_code;
-    const opt = document.createElement("option");
-    opt.value = code;
-    opt.textContent = code + " - " + loc.name;
-    sel.appendChild(opt);
+    const label = code + " - " + loc.name;
+    sel.add(new Option(label, code));
+    report.add(new Option(label, code));
   });
-  if (state.locations.some((loc) => loc.eluno.store_code === "HSR")) sel.value = "HSR";
+  if (state.locations.some((loc) => loc.eluno.store_code === "HSR")) {
+    sel.value = "HSR";
+    report.value = "HSR";
+  }
   await loadCashiers();
   await loadCatalog();
 }
@@ -89,7 +93,6 @@ async function loadCashiers() {
   });
   $("reportStore").value = store;
 }
-
 async function loadCatalog() {
   const frames = await api("/api/products?product_type=Frame");
   const lenses = await api("/api/products?product_type=Lens");
@@ -179,12 +182,22 @@ async function refreshStock() {
   const store = $("store").value;
   const loc = state.locations.find((x) => (x.eluno || {}).store_code === store);
   if (!loc) return;
-  const itemIds = state.cart.map((p) => p.item).filter(Boolean).join(",");
+  const wanted = {};
+  state.cart.forEach((p) => {
+    if (!p.item) return;
+    if (!wanted[p.item]) wanted[p.item] = { label: p.frameLabel, qty: 0 };
+    wanted[p.item].qty += 1;
+  });
+  const itemIds = Object.keys(wanted).join(",");
   if (!itemIds) { text("inventoryInfo", ""); return; }
   try {
     const data = await api("/api/inventory?item_ids=" + itemIds + "&location_id=" + loc.id);
-    const rows = (data.inventory_levels || []).map((row) =>
-      "frame item " + row.inventory_item_id + ": " + row.available + " in stock");
+    const rows = (data.inventory_levels || []).map((row) => {
+      const want = wanted[String(row.inventory_item_id)];
+      const label = want ? want.label : "item " + row.inventory_item_id;
+      const short = want && row.available < want.qty ? " - not enough for this bill" : "";
+      return label + ": " + row.available + " in stock" + short;
+    });
     text("inventoryInfo", rows.join("\n"));
   } catch (e) {
     text("inventoryInfo", "");
@@ -251,7 +264,10 @@ async function doCheckout() {
       "<p>Shopify order " + esc(result.shopify_order_number) + " (id " + esc(result.shopify_order_id) + ")</p>" +
       "<p>Charged " + money(result.total_paise) + " on terminal, charge " + esc(result.charge_id) + "</p>" +
       "<p class='hint'>Status: " + esc(result.status) + "</p>");
-    if (result.invoice_no) $("refundInvoice").value = result.invoice_no;
+    if (result.invoice_no) {
+      $("refundInvoice").value = result.invoice_no;
+      $("refundCard").scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   } catch (e) {
     fail("checkoutOut", e.message);
   }
