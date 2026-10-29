@@ -113,7 +113,7 @@ Two things to expect on the free tier:
 
 `Procfile` is there for Railway or Heroku style hosts; Render uses the start command above.
 
-Live demo: _add the deployed URL here before submitting._
+Live demo: https://eluno-submission.onrender.com/ (free tier, so the first hit after idle takes up to a minute)
 
 ## Decisions and limits
 
