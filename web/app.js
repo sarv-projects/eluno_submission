@@ -2,6 +2,7 @@
 // plain js, no build step. keep it readable for whoever picks this up next.
 
 const $ = (id) => document.getElementById(id);
+const CART_KEY = "eluno-cart";
 const state = { locations: [], cart: [] };
 
 function money(paise) {
@@ -41,6 +42,20 @@ function fail(el, message) {
   node.textContent = message;
 }
 
+// stop a second click landing while a request is in flight
+async function busy(buttonId, label, work) {
+  const btn = $(buttonId);
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try {
+    return await work();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 async function api(path, options) {
   const res = await fetch(path, options);
   const raw = await res.text();
@@ -56,6 +71,17 @@ function post(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function saveCart() {
+  try { sessionStorage.setItem(CART_KEY, JSON.stringify(state.cart)); } catch (e) { /* private mode */ }
+}
+
+function restoreCart() {
+  try {
+    const raw = sessionStorage.getItem(CART_KEY);
+    if (raw) state.cart = JSON.parse(raw) || [];
+  } catch (e) { state.cart = []; }
 }
 
 async function loadStores() {
@@ -86,13 +112,11 @@ async function loadCashiers() {
   const sel = $("staff");
   sel.innerHTML = "";
   (data.staff || []).forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.staff_id;
-    opt.textContent = s.staff_id + " (" + s.role + ")";
-    sel.appendChild(opt);
+    sel.add(new Option(s.staff_id + " (" + s.role + ")", s.staff_id));
   });
   $("reportStore").value = store;
 }
+
 async function loadCatalog() {
   const frames = await api("/api/products?product_type=Frame");
   const lenses = await api("/api/products?product_type=Lens");
@@ -139,7 +163,10 @@ async function findCustomer() {
 function addPair() {
   const frameSelect = $("frameVariant");
   const lensSelect = $("lensVariant");
-  if (!frameSelect.value || !lensSelect.value) return;
+  if (!frameSelect.value || !lensSelect.value) {
+    text("inventoryInfo", "Catalog has not loaded yet. Wait a moment and try again.");
+    return;
+  }
   state.cart.push({
     frame: Number(frameSelect.value),
     lens: Number(lensSelect.value),
@@ -148,6 +175,7 @@ function addPair() {
     frameLabel: frameSelect.selectedOptions[0].dataset.label,
     lensLabel: lensSelect.selectedOptions[0].dataset.label,
   });
+  saveCart();
   renderCart();
   refreshStock();
 }
@@ -155,6 +183,9 @@ function addPair() {
 function renderCart() {
   const body = $("cartTable").querySelector("tbody");
   body.innerHTML = "";
+  $("cartCount").textContent = state.cart.length
+    ? "(" + state.cart.length + (state.cart.length === 1 ? " pair)" : " pairs)")
+    : "";
   if (!state.cart.length) {
     body.innerHTML = "<tr><td colspan='4' class='hint'>Cart is empty. Add a pair above.</td></tr>";
     return;
@@ -171,6 +202,7 @@ function renderCart() {
   body.querySelectorAll("button.link").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.cart.splice(Number(btn.dataset.i), 1);
+      saveCart();
       renderCart();
       refreshStock();
     });
@@ -219,6 +251,8 @@ function billBody() {
   };
 }
 
+const NO_CART = "Cart is empty. Add a pair in step 3 first.";
+
 function renderQuote(q) {
   const lines = (q.lines || []).map((line) =>
     "<tr><td>" + esc(line.description) + " <span class='tag'>" + esc(line.line_type) + "</span></td>" +
@@ -245,84 +279,102 @@ function renderQuote(q) {
 }
 
 async function getQuote() {
-  if (!state.cart.length) { fail("quoteOut", "Add at least one pair first."); return; }
-  try {
-    renderQuote(await post("/api/quote", billBody()));
-  } catch (e) {
-    fail("quoteOut", e.message);
-  }
+  if (!state.cart.length) { fail("quoteOut", NO_CART); return; }
+  await busy("quoteBtn", "Pricing...", async () => {
+    try {
+      renderQuote(await post("/api/quote", billBody()));
+    } catch (e) {
+      fail("quoteOut", e.message);
+    }
+  });
 }
 
 async function doCheckout() {
-  if (!state.cart.length) { fail("checkoutOut", "Add at least one pair first."); return; }
+  if (!state.cart.length) { fail("checkoutOut", NO_CART); return; }
   const body = billBody();
   body.checkout_key = $("checkoutKey").value.trim() || null;
-  try {
-    const result = await post("/api/checkout", body);
-    html("checkoutOut",
-      "<p><b>Invoice " + esc(result.invoice_no) + "</b></p>" +
-      "<p>Shopify order " + esc(result.shopify_order_number) + " (id " + esc(result.shopify_order_id) + ")</p>" +
-      "<p>Charged " + money(result.total_paise) + " on terminal, charge " + esc(result.charge_id) + "</p>" +
-      "<p class='hint'>Status: " + esc(result.status) + "</p>");
-    if (result.invoice_no) {
-      $("refundInvoice").value = result.invoice_no;
+  await busy("checkoutBtn", "Charging...", async () => {
+    try {
+      const result = await post("/api/checkout", body);
+      html("checkoutOut",
+        "<p><b>Invoice " + esc(result.invoice_no) + "</b></p>" +
+        "<p>Shopify order " + esc(result.shopify_order_number) + " (id " + esc(result.shopify_order_id) + ")</p>" +
+        "<p>Charged " + money(result.total_paise) + " on terminal, charge " + esc(result.charge_id) + "</p>" +
+        "<p class='hint'>Status: " + esc(result.status) + "</p>");
+      // the bill is done, so clear the cart to stop an accidental second charge
+      state.cart = [];
+      saveCart();
+      renderCart();
+      text("inventoryInfo", "");
+      if (result.invoice_no) $("refundInvoice").value = result.invoice_no;
       $("refundCard").scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (e) {
+      fail("checkoutOut", e.message);
     }
-  } catch (e) {
-    fail("checkoutOut", e.message);
-  }
+  });
 }
 
 async function doRefund() {
   const invoice = $("refundInvoice").value.trim();
   if (!invoice) { fail("refundOut", "Enter the invoice number to refund."); return; }
-  try {
-    const result = await post("/api/refund", {
-      invoice: invoice,
-      store: $("store").value,
-      reason: $("refundReason").value.trim(),
-      reason_code: $("refundReasonCode").value.trim(),
-      refund_key: $("refundKey").value.trim() || null,
-    });
-    html("refundOut",
-      "<p><b>Credit note " + esc(result.credit_note_no) + "</b></p>" +
-      "<p>Refunded " + money(result.amount_paise) + " for invoice " + esc(result.invoice_no) + "</p>" +
-      "<p class='hint'>Frame restocked, lens not. Status: " + esc(result.status) + "</p>");
-  } catch (e) {
-    fail("refundOut", e.message);
-  }
+  await busy("refundBtn", "Refunding...", async () => {
+    try {
+      const result = await post("/api/refund", {
+        invoice: invoice,
+        store: $("store").value,
+        reason: $("refundReason").value.trim(),
+        reason_code: $("refundReasonCode").value.trim(),
+        refund_key: $("refundKey").value.trim() || null,
+      });
+      html("refundOut",
+        "<p><b>Credit note " + esc(result.credit_note_no) + "</b></p>" +
+        "<p>Refunded " + money(result.amount_paise) + " for invoice " + esc(result.invoice_no) + "</p>" +
+        "<p class='hint'>Frame restocked, lens not. Status: " + esc(result.status) + "</p>");
+    } catch (e) {
+      fail("refundOut", e.message);
+    }
+  });
 }
 
 async function runReport() {
-  try {
-    const store = encodeURIComponent($("reportStore").value);
-    const day = encodeURIComponent($("reportDate").value);
-    const r = await api("/api/report?store=" + store + "&date=" + day);
-    const methods = Object.entries(r.payments_by_method_paise || {})
-      .map(([k, v]) => "<li>" + esc(k) + ": " + money(v) + "</li>").join("");
-    const channels = Object.entries(r.by_channel || {})
-      .map(([k, v]) => "<tr><td>" + esc(k) + "</td><td>" + v.bill_count + "</td><td>" +
-        money(v.net_sales_paise) + "</td><td>" + money(v.refunds_paise) + "</td></tr>").join("");
-    html("reportOut",
-      "<p><b>" + esc(r.store_code) + " on " + esc(r.business_date) + "</b> - " + r.bill_count +
-      (r.bill_count === 1 ? " bill" : " bills") + "</p>" +
-      "<p>Gross " + money(r.gross_paise) + " | discounts " + money(r.discounts_paise) +
-      " | net " + money(r.net_sales_paise) + "</p>" +
-      "<p>Taxable " + money(r.taxable_paise) + " | tax " + money(r.tax_paise) +
-      " | refunds " + money(r.refunds_paise) + "</p>" +
-      "<p><b>By payment</b></p><ul>" + (methods || "<li>none</li>") + "</ul>" +
-      "<table><thead><tr><th>Channel</th><th>Bills</th><th>Net</th><th>Refunds</th></tr></thead><tbody>" +
-      (channels || "<tr><td colspan='4'>no bills</td></tr>") + "</tbody></table>");
-  } catch (e) {
-    fail("reportOut", e.message);
-  }
+  await busy("reportBtn", "Reading...", async () => {
+    try {
+      const store = encodeURIComponent($("reportStore").value);
+      const day = encodeURIComponent($("reportDate").value);
+      const r = await api("/api/report?store=" + store + "&date=" + day);
+
+      const methods = Object.entries(r.payments_by_method_paise || {})
+        .map(([k, v]) => "<li>" + esc(k) + ": " + money(v) + "</li>").join("");
+      const refundMethods = Object.entries(r.refunds_by_method_paise || {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => "<li>" + esc(k) + ": " + money(v) + "</li>").join("");
+      const channels = Object.entries(r.by_channel || {})
+        .map(([k, v]) => "<tr><td>" + esc(k) + "</td><td>" + v.bill_count + "</td><td>" +
+          money(v.net_sales_paise) + "</td><td>" + money(v.refunds_paise) + "</td></tr>").join("");
+
+      html("reportOut",
+        "<p><b>" + esc(r.store_code) + " on " + esc(r.business_date) + "</b> - " + r.bill_count +
+        (r.bill_count === 1 ? " bill" : " bills") + "</p>" +
+        "<p>Gross " + money(r.gross_paise) + " | discounts " + money(r.discounts_paise) +
+        " | net " + money(r.net_sales_paise) + "</p>" +
+        "<p>Taxable " + money(r.taxable_paise) + " | tax " + money(r.tax_paise) +
+        " | refunds " + money(r.refunds_paise) + "</p>" +
+        "<p><b>Net after refunds: " + money(r.net_after_refunds_paise) + "</b></p>" +
+        "<p><b>Sales by payment</b></p><ul>" + (methods || "<li>none</li>") + "</ul>" +
+        (refundMethods ? "<p><b>Refunds by payment</b></p><ul>" + refundMethods + "</ul>" : "") +
+        "<table><thead><tr><th>Channel</th><th>Bills</th><th>Net</th><th>Refunds</th></tr></thead><tbody>" +
+        (channels || "<tr><td colspan='4'>no bills</td></tr>") + "</tbody></table>");
+    } catch (e) {
+      fail("reportOut", e.message);
+    }
+  });
 }
 
 $("store").addEventListener("change", async () => {
   await loadCashiers();
   refreshStock();
 });
-$("lookupCustomer").addEventListener("click", findCustomer);
+$("lookupCustomer").addEventListener("click", () => busy("lookupCustomer", "Looking up...", findCustomer));
 $("addPair").addEventListener("click", addPair);
 $("quoteBtn").addEventListener("click", getQuote);
 $("checkoutBtn").addEventListener("click", doCheckout);
@@ -331,5 +383,26 @@ $("reportBtn").addEventListener("click", runReport);
 
 $("saleDate").value = today();
 $("reportDate").value = today();
+restoreCart();
 renderCart();
-loadStores().then(findCustomer).catch((e) => fail("customerInfo", e.message));
+
+// the free tier sleeps, so retry the first load instead of dying on one failure
+async function boot() {
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      await loadStores();
+      await findCustomer();
+      refreshStock();
+      return;
+    } catch (e) {
+      if (attempt === 6) {
+        fail("customerInfo", "Could not reach the server: " + e.message + ". Reload the page in a minute.");
+        return;
+      }
+      text("customerInfo", "Waking the server up, retrying (" + attempt + "/5)...");
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
+boot();
